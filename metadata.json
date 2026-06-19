@@ -1,0 +1,8 @@
+{
+  "name": "GaucherPredict Mobile",
+  "description": "2026 CSC499 Project - AI-Powered Gaucher Disease Diagnostics",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
