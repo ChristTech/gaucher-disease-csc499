@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import {
   Loader2, BrainCircuit, ChevronRight, RefreshCcw, WifiOff,
-  CreditCard, AlertTriangle, RotateCcw, Cpu, Check, Dna,
+  CreditCard, AlertTriangle, RotateCcw, Check, Dna,
   FlaskConical, Stethoscope, Activity, ChevronDown,
 } from 'lucide-react';
 import { analyzeStage, AIErrorType } from '../services/geminiService';
@@ -186,12 +186,6 @@ const NewPredictionForm: React.FC<NewPredictionFormProps> = ({ currentUser, onSa
     );
   };
 
-  const FallbackNotice = () => usedFallback ? (
-    <div className="flex items-center gap-2.5 px-4 py-2.5 bg-violet-50 border border-violet-200 rounded-2xl text-xs animate-in fade-in duration-500 mb-4">
-      <Cpu className="w-4 h-4 text-violet-500 shrink-0" />
-      <span className="text-violet-700 font-semibold">Powered by <span className="font-black">Llama 3.3 (Groq)</span> — Gemini was temporarily unavailable.</span>
-    </div>
-  ) : null;
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
   const sym = (k: keyof GaucherSymptoms, v: boolean) =>
@@ -402,8 +396,6 @@ ASSESSMENT CONFIDENCE: ${confidence}
             <RefreshCcw className="w-4 h-4" /> New Assessment
           </button>
         </div>
-
-        <FallbackNotice />
 
         {/* Doctor assignment notice — shown prominently */}
         <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 flex items-center gap-5">
