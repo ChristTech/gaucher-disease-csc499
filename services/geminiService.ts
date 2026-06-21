@@ -187,43 +187,192 @@ async function callGroq(
 
 /**
  * Analyzes clinical data for Gaucher Disease risk.
- *
- * Strategy:
- *   1. Try Gemini first.
- *   2. If Gemini throws (quota, network, or other), automatically fall back to
- *      Groq (llama-3.3-70b-versatile).
- *   3. If both fail, return the Groq error (more informative for the user).
- *
- * The caller receives the same `AIResult` shape regardless of which model answered.
- * Check `result.usedFallback` if you want to show a notice in the UI.
+ * (Legacy single-prompt path — kept for backward compatibility.)
  */
 export async function analyzeClinicalData(
   prompt: string,
   history: ConversationTurn[] = []
 ): Promise<AIResult> {
-  // ── 1. Try Gemini ──
   try {
     const geminiResult = await callGemini(prompt, history);
-    if ('data' in geminiResult) {
-      return { data: geminiResult.data, error: null, usedFallback: false };
-    }
-    // Gemini returned a structured error (e.g. missing key) — fall through to Groq
+    if ('data' in geminiResult) return { data: geminiResult.data, error: null, usedFallback: false };
     console.warn('[GaucherPredict] Gemini unavailable, switching to Groq fallback.', geminiResult.error);
   } catch (rawError) {
-    const classified = classifyError(rawError);
-    console.warn('[GaucherPredict] Gemini threw an error, switching to Groq fallback.', classified);
+    console.warn('[GaucherPredict] Gemini threw an error, switching to Groq fallback.', classifyError(rawError));
   }
-
-  // ── 2. Try Groq fallback ──
   try {
     const groqResult = await callGroq(prompt, history);
-    if ('data' in groqResult) {
-      return { data: groqResult.data, error: null, usedFallback: true };
-    }
-    // Groq also returned a structured error
+    if ('data' in groqResult) return { data: groqResult.data, error: null, usedFallback: true };
     return { data: null, error: groqResult.error, usedFallback: true };
   } catch (rawError) {
     console.error('[GaucherPredict] Groq fallback also failed.', rawError);
+    return { data: null, error: classifyError(rawError), usedFallback: true };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-stage analysis — works alongside the scoring engine
+// The engine computes the numerical score; the LLM explains it clinically.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STAGE_INSTRUCTIONS: Record<1 | 2 | 3, (score: number, extra?: string) => string> = {
+  1: (score) => `You are a Gaucher Disease specialist reviewing a patient's symptom report at Kwara State University.
+A rule-based scoring engine has calculated a symptom risk score of ${score}/100.
+Write your response in plain, friendly English that a patient with no medical background can understand.
+Explain what the score means, which symptoms are most concerning and why, and what happens next.
+Avoid medical jargon where possible. When you must use a medical term, briefly explain it in plain words.
+Do NOT change the score. Keep your response encouraging but honest.`,
+
+  2: (score) => `You are a Gaucher Disease specialist reviewing a patient's blood test results.
+The scoring engine calculated a lab test score of ${score}/100.
+Write your response in plain, friendly English that a non-medical reader can understand.
+Explain what each abnormal value might mean in simple terms (e.g. instead of "thrombocytopenia", say "a low platelet count, which affects how your blood clots").
+Do NOT change the score.`,
+
+  3: (score, typeSuspicion) =>
+    `You are a Gaucher Disease specialist completing a full multi-stage assessment for a patient.
+Overall risk score: ${score}/100. Suspected Gaucher type (from scoring engine): ${typeSuspicion || 'Undetermined'}.
+Write a clear, plain-English summary that the patient and their assigned doctor can both read and understand.
+Explain what the results mean, what type of Gaucher disease is suspected and why it matters, and give a simple, numbered list of what the patient should do next.
+Use reassuring, supportive language. Avoid jargon — if a technical term is essential, explain it immediately in brackets.`,
+};
+
+/**
+ * Stage-aware analysis for the multi-stage prediction workflow.
+ *
+ * Strategy:
+ *   1. Try Gemini (requires API_KEY env var).
+ *   2. If Gemini is missing, throws, or returns empty → try Groq (requires GROQ_API_KEY).
+ *   3. If both fail → return classified error to the UI.
+ *
+ * @param stage          Which stage is being analysed (1, 2, or 3)
+ * @param context        Structured clinical summary string built by the form
+ * @param engineScore    Deterministic score from scoringEngine.ts
+ * @param typeSuspicion  (Stage 3 only) Type suspicion from genetic scoring
+ */
+export async function analyzeStage(
+  stage: 1 | 2 | 3,
+  context: string,
+  engineScore: number,
+  typeSuspicion?: string
+): Promise<AIResult> {
+  const systemInstruction = STAGE_INSTRUCTIONS[stage](engineScore, typeSuspicion);
+
+  // JSON schema passed to Gemini (structured output mode)
+  const stageSchema = stage === 3
+    ? {
+        type: Type.OBJECT,
+        properties: {
+          reasoning:         { type: Type.STRING, description: 'Plain-English multi-stage summary for patient and doctor' },
+          typeSuspicion:     { type: Type.STRING, enum: ['Type 1', 'Type 2', 'Type 3', 'Undetermined'] },
+          suggestedNextSteps:{ type: Type.ARRAY, items: { type: Type.STRING } },
+        },
+        required: ['reasoning', 'typeSuspicion', 'suggestedNextSteps'],
+      }
+    : {
+        type: Type.OBJECT,
+        properties: {
+          reasoning:         { type: Type.STRING, description: 'Plain-English interpretation of this stage' },
+          keyFindings:       { type: Type.ARRAY, items: { type: Type.STRING } },
+          suggestedNextSteps:{ type: Type.ARRAY, items: { type: Type.STRING } },
+        },
+        required: ['reasoning', 'keyFindings', 'suggestedNextSteps'],
+      };
+
+  // JSON schema description for Groq (text-based, since Groq uses json_object mode, not structured output)
+  const groqSchemaDesc = stage === 3
+    ? `{ "reasoning": string, "typeSuspicion": "Type 1"|"Type 2"|"Type 3"|"Undetermined", "suggestedNextSteps": string[] }`
+    : `{ "reasoning": string, "keyFindings": string[], "suggestedNextSteps": string[] }`;
+
+  // Stage 3 needs more tokens for a comprehensive final synthesis
+  const maxTokens = stage === 3 ? 2048 : 1024;
+
+  // ── 1. Try Gemini ──────────────────────────────────────────────────────────
+  const geminiKey = process.env.API_KEY;
+  if (geminiKey && geminiKey.trim().length > 0) {
+    try {
+      const ai = new GoogleGenAI({ apiKey: geminiKey });
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-preview-05-20',
+        contents: [{ role: 'user', parts: [{ text: context }] }],
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: stageSchema,
+        },
+      });
+      const text = response.text;
+      if (text && text.trim().length > 0) {
+        try {
+          return { data: JSON.parse(text.trim()), error: null, usedFallback: false };
+        } catch {
+          console.warn('[GaucherPredict] analyzeStage: Gemini JSON parse failed, falling back to Groq.');
+        }
+      }
+    } catch (rawError) {
+      console.warn('[GaucherPredict] analyzeStage: Gemini call failed, falling back to Groq.', classifyError(rawError));
+    }
+  } else {
+    console.info('[GaucherPredict] analyzeStage: No Gemini API key configured — going straight to Groq.');
+  }
+
+  // ── 2. Groq fallback ───────────────────────────────────────────────────────
+  const groqKey = process.env.GROQ_API_KEY;
+  const groqKeyMissing =
+    !groqKey ||
+    groqKey.trim().length === 0 ||
+    groqKey === 'your_groq_api_key_here';
+
+  if (groqKeyMissing) {
+    return {
+      data: null,
+      error: {
+        type: 'unknown',
+        message:
+          'Neither AI service is configured. Please add API_KEY (Gemini) or GROQ_API_KEY (Groq) to your environment variables.',
+      },
+      usedFallback: true,
+    };
+  }
+
+  try {
+    const groq = new Groq({ apiKey: groqKey, dangerouslyAllowBrowser: true });
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: `${systemInstruction}\n\nReturn ONLY valid JSON with no additional text or markdown. Schema: ${groqSchemaDesc}`,
+        },
+        { role: 'user', content: context },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.3,
+      max_tokens: maxTokens,
+    });
+
+    const text = completion.choices[0]?.message?.content;
+    if (!text || text.trim().length === 0) {
+      return {
+        data: null,
+        error: { type: 'unknown', message: 'Groq returned an empty response. Please try again.' },
+        usedFallback: true,
+      };
+    }
+
+    try {
+      return { data: JSON.parse(text.trim()), error: null, usedFallback: true };
+    } catch {
+      return {
+        data: null,
+        error: {
+          type: 'unknown',
+          message: 'The AI response could not be read correctly. Please try again.',
+        },
+        usedFallback: true,
+      };
+    }
+  } catch (rawError) {
     return { data: null, error: classifyError(rawError), usedFallback: true };
   }
 }
