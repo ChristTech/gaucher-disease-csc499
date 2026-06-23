@@ -713,7 +713,7 @@ ASSESSMENT CONFIDENCE: ${confidence}
               <label className={labelCls}>Ethnic Background</label>
               <select value={ethnicity} onChange={e => setEthnicity(e.target.value as EthnicBackground | '')} className={selectCls}>
                 <option value="">Not specified</option>
-                <option>Ashkenazi Jewish</option>
+                <option>African</option>
                 <option>Other / Unknown</option>
               </select>
             </div>
