@@ -500,7 +500,6 @@ ASSESSMENT CONFIDENCE: ${confidence}
     return (
       <div className="max-w-3xl mx-auto px-4 md:px-0 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
         <Stepper active={activeStep} done={[1, 2]} />
-        <FallbackNotice />
         <StageScoreCard stage={2} score={s2Result.score} label={s2Result.score >= STAGE_3_UNLOCK_THRESHOLD ? 'Biochemical markers abnormal — genetic panel recommended' : 'Biochemical results mildly abnormal'} />
         <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
           <CardHeader icon={<FlaskConical className="w-6 h-6 text-white" />} title="Lab Results Analysis" subtitle="Step 2 Result" />
@@ -539,7 +538,7 @@ ASSESSMENT CONFIDENCE: ${confidence}
     return (
       <div className="max-w-3xl mx-auto px-4 md:px-0 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
         <Stepper active={2} done={[1]} />
-        <FallbackNotice />
+
         <ErrorBanner />
         <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
           <CardHeader icon={<FlaskConical className="w-6 h-6 text-white" />} title="Lab Test Results" subtitle="Step 2 · Optional — Only if you have blood test results" />
@@ -590,7 +589,6 @@ ASSESSMENT CONFIDENCE: ${confidence}
     return (
       <div className="max-w-3xl mx-auto px-4 md:px-0 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
         <Stepper active={2} done={[1]} />
-        <FallbackNotice />
         <StageScoreCard stage={1} score={s1Result.score} label={
           s1Result.score >= 65 ? 'High suspicion — biochemical assessment strongly advised' :
           canProceed ? 'Moderate suspicion — biochemical assessment recommended' :
@@ -641,7 +639,7 @@ ASSESSMENT CONFIDENCE: ${confidence}
     return (
       <div className="max-w-3xl mx-auto px-4 md:px-0 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
         <Stepper active={3} done={[1, 2]} />
-        <FallbackNotice />
+
         <ErrorBanner />
         <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
           <CardHeader icon={<Dna className="w-6 h-6 text-white" />} title="Genetic Test Results" subtitle="Step 3 · Optional — Only if you have genetic test results" />
